@@ -1,0 +1,4 @@
+# host tools: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+pyserial>=3.5     # cfboot.py, sidplay.py
+mpremote>=1.20    # ezport/ezflash.py (RP2040 EzPort programmer)
+py65>=1.1         # sid/sid2log.py (6502 emulation of the C64 tunes)

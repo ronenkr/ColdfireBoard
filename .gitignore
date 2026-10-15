@@ -1,0 +1,13 @@
+# local tools (recreate: tools/setup_toolchain.sh, pip install -r requirements.txt)
+toolchain/
+.venv/
+__pycache__/
+
+# build intermediates (the .bin images are committed)
+*.o
+*.elf
+build/sidl/
+build/big_random.bin
+
+# vendor documents (NXP datasheet / reference manual: download from nxp.com)
+*.pdf

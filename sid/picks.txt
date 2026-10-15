@@ -1,0 +1,22 @@
+# hand-picked tunes for the on-board bank: name [sub-song] [seconds]
+20cc-blue_monday.sid
+20cc-this_is_your_life.sid
+20cc-too_drunk_to_fuck1.sid
+4mat-rollover_part2.sid
+adam_bellin-ghost_busters.sid
+agemixer-commando_remix.sid
+agemixer-desert_queen.sid
+agemixer-extreme_silence.sid
+agemixer-fokotozo.sid
+agemixer-strobosphere.sid
+agemixer-x-files_remix.sid
+alien-unreal2.sid
+amj-sys4096.sid
+antti_hannula-russian.sid
+antti_hannula-weekend.sid
+blues_muz-airwalk.sid
+blues_muz-chaos2000.sid
+ciaran-knulla_kuk.sid
+dalezy-ihmissavellis.sid
+dane-shining_hour.sid
+heatwave-quasi_modo.sid
