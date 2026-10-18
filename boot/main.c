@@ -36,7 +36,7 @@ static void clock_init(void)
     CCHR = CCHR_48MHZ;                       /* /2 -> fref 6 MHz */
     SYNCR = SYNCR_MFD(2) | SYNCR_RFD(1) | SYNCR_PLLMODE | SYNCR_PLLEN;
     while (!(SYNSR & SYNSR_LOCK))
-        ;
+        bwt_service();
     SYNCR = SYNCR_MFD(2) | SYNCR_RFD(1) | SYNCR_CLKSRC | SYNCR_PLLMODE | SYNCR_PLLEN;
     SYNCR = SYNCR_48MHZ_FINAL;               /* RFD /1 -> 48 MHz */
 }
@@ -71,8 +71,11 @@ static void timer_init(void)
 /* ---- reset / app ------------------------------------------------------- */
 static void delay_spin(uint32_t n)           /* timer-free: apps call reboot() */
 {
-    while (n--)
+    while (n--) {
         __asm__ volatile ("nop");
+        if (!(n & 0xFFFF))
+            bwt_service();                   /* every few ms: a leftover watchdog */
+    }
 }
 
 /* USB detach time before reset / handing over to the app. It must be long
@@ -120,6 +123,7 @@ static void start_app(void)
     delay_spin(DETACH_SPINS);
     usb_in_bootloader = 0;                   /* app's usb_init() enumerates as the app */
     PCSR0 = 0;
+    bwt_service();                           /* the app starts with a full timeout */
     jump_to_app(APP_BASE);
 }
 
@@ -173,6 +177,8 @@ static uint32_t crc32(const uint8_t *p, uint32_t n)
     uint32_t c = 0xFFFFFFFFu;
     int k;
     while (n--) {
+        if (!(n & 0xFFF))
+            bwt_service();                   /* ~8 ms between feeds */
         c ^= *p++;
         for (k = 0; k < 8; k++)
             c = (c >> 1) ^ (0xEDB88320u & -(c & 1));
@@ -203,13 +209,15 @@ static void command(char *line)
     case 'E':
         if (!range_ok(a, n, 1))
             break;
-        for (i = a & ~2047u; i < a + n; i += 2048)
+        for (i = a & ~2047u; i < a + n; i += 2048) {
+            bwt_service();                   /* a full erase takes ~10 s */
             if (flash_erase_page(i)) {
                 out("ERR erase ");
                 out_hex(i);
                 out("\n");
                 return;
             }
+        }
         out("OK\n");
         return;
     case 'W':
@@ -223,6 +231,7 @@ static void command(char *line)
             }
             xfer[i] = c;
         }
+        bwt_service();
         if (flash_program(a, (const uint32_t *)xfer, n / 4)) {
             out("ERR program\n");
             return;
@@ -270,9 +279,13 @@ int main(void)
     static char line[48];
     unsigned len = 0;
     int stay = boot_magic == BOOT_MAGIC;
+#ifndef NO_DEBUG
+    uint8_t rsr = REG8(0x110001);            /* reset cause, latched at reset */
+#endif
     uint8_t c;
 
     boot_magic = 0;
+    bwt_service();                           /* before the slow clock/PLL setup */
     clock_init();
     timer_init();
     uart_init();
@@ -280,7 +293,19 @@ int main(void)
 #ifndef NO_DEBUG
     uart_puts("\n# cfboot: fsys 48 MHz, app ");
     uart_puts(app_valid() ? "valid" : "missing");
-    uart_puts(stay ? ", stay requested\n" : "\n");
+    uart_puts(stay ? ", stay requested" : "");
+    /* reset cause (RM 11.5.2): 80 BWT, 40 LVD, 20 SOFT, 10 WDR, 08 POR, 04 EXT, 02 LOC, 01 LOL */
+    uart_puts(", rsr ");
+    uart_puthex(rsr, 2);
+    uart_puts(" wcr ");                      /* backup watchdog: control, modulus, count; BWCR */
+    uart_puthex(REG16(0x140000), 4);
+    uart_puts(" wmr ");
+    uart_puthex(REG16(0x140002), 4);
+    uart_puts(" wcntr ");
+    uart_puthex(REG16(0x140004), 4);
+    uart_puts(" bwcr ");
+    uart_puthex(REG8(0x120013), 2);
+    uart_puts("\n");
 #endif
     if (!app_valid())
         stay = 1;

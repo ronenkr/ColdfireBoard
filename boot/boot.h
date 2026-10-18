@@ -18,6 +18,24 @@ typedef struct {
     uint16_t wLength;
 } setup_t;
 
+/* Backup watchdog timer (RM ch. 8). WCR/WMR/BWCR are write-once and only a
+ * power-on reset clears them, so a watchdog enabled by the previous firmware
+ * (the original SafeQ one) stays armed through every warm reset, EzPort ones
+ * included, and resets the chip (RSR = 0x80) every few hundred ms. If it is
+ * enabled, feed it (0x5555 then 0xAAAA to WSR). WCR is a 16-bit register at
+ * 0x40140000: EN is bit 0, i.e. the byte at ...001 (an 8-bit read of ...000
+ * sees the reserved high byte and is always 0). usb_poll() calls this, so
+ * apps that call usb_poll() regularly keep the watchdog fed as well. */
+#define BWT_WCR  (*(volatile uint16_t *)0x40140000)
+#define BWT_WSR  (*(volatile uint16_t *)0x40140006)
+static inline void bwt_service(void)
+{
+    if (BWT_WCR & 1) {
+        BWT_WSR = 0x5555;
+        BWT_WSR = 0xAAAA;
+    }
+}
+
 /* uart.c */
 void uart_init(void);
 void uart_putc(char c);

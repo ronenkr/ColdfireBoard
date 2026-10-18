@@ -20,3 +20,7 @@ ciaran-knulla_kuk.sid
 dalezy-ihmissavellis.sid
 dane-shining_hour.sid
 heatwave-quasi_modo.sid
+tdm-mind_control-end.sid
+tdm-leningrad.sid
+tomas_danko-just_like_before.sid
+tomas_danko-smooth_criminal.sid

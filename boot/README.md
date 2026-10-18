@@ -86,6 +86,17 @@ the self-test itself.
 - **Debug log:** off in normal builds. `make DEBUG=1` sends a compact USB
   event log on UART1 TX (MCU pin 19, CON5-7, 115200 8N1; the UART runs on
   fsys = 48 MHz). Read it with the RP2040: `ezport/ezflash.py console`.
+- **Leftover watchdog:** a board that still has its original SafeQ firmware
+  has the backup watchdog armed, and it stays armed after that firmware is
+  erased (its registers are write-once; only a power-on reset clears them), so
+  the chip resets every few hundred ms. The bootloader feeds it (`bwt_service()`
+  in `boot.h`): at start-up, in `usb_poll()`, between page erases, during CRCs
+  and the app hand-over. Apps that run on such a board must reach
+  `usb_poll()` soon after start and call it regularly. Unplugging the board
+  disarms it. `make DEBUG=1` prints the reset cause (`rsr 80` = backup
+  watchdog) and the watchdog registers; `fw/bwtarm.c` arms the watchdog for
+  testing. Note that WCR is a 16-bit register: the enable bit is in the byte at
+  `0x40140001`.
 - **Apps and interrupts:** VBR must be 1 MB aligned, so apps copy their
   vector table to SRAM at `0x20000000` (`fw/start.S`) and install handlers
   there. An unexpected exception in an app does a soft reset, which falls back

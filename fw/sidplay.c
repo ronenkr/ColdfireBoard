@@ -256,6 +256,64 @@ static sidz_dec_t dec[4];
 static uint8_t stream_mode;             /* host is streaming: bank paused */
 static uint32_t stream_last;            /* isr_n of the last streamed frame */
 
+/* ---- shuffled play order, reshuffled at power-up and after each full pass ---- */
+static uint8_t order[256];
+static uint16_t order_pos;
+static uint32_t rng;
+
+static uint32_t rand32(void)                /* xorshift32 */
+{
+    rng ^= rng << 13;
+    rng ^= rng >> 17;
+    rng ^= rng << 5;
+    return rng;
+}
+
+/* No hardware RNG on the MCF52254. Seed from: SRAM contents that nothing has
+ * written yet (random after a cold power-up), the bootloader's stopped PIT0
+ * count and the USB frame number (both depend on boot/enumeration timing), and
+ * a word kept in the bootloader's no-init RAM that changes on every boot (so
+ * warm resets, where SRAM repeats, still get a new order). */
+#define SEED_CARRY (*(volatile uint32_t *)0x2000FFF8)
+static void seed_rng(void)
+{
+    const volatile uint32_t *p = (const uint32_t *)0x20004000;
+    uint32_t h = 2166136261u;
+    for (; p < (const uint32_t *)0x2000C000; p++)
+        h = (h ^ *p) * 16777619u;
+    h ^= (uint32_t)REG16(0x150004) << 16;       /* PIT0 count left by the bootloader */
+    h ^= REG8(0x1C00A0) | REG8(0x1C00A4) << 8;  /* USB FRM_NUML/H */
+    h ^= SEED_CARRY;
+    rng = h ? h : 0x9E3779B9u;
+    SEED_CARRY = rand32() ^ 0xA5A5A5A5u;
+}
+
+static void shuffle(uint16_t avoid_first)
+{
+    uint16_t i;
+    for (i = 0; i < bank_count; i++)
+        order[i] = i;
+    for (i = bank_count - 1; i > 0; i--) {     /* Fisher-Yates */
+        uint16_t j = rand32() % (i + 1);
+        uint8_t t = order[i];
+        order[i] = order[j];
+        order[j] = t;
+    }
+    if (bank_count > 1 && order[0] == avoid_first) {
+        uint8_t t = order[0];                   /* no repeat across reshuffles */
+        order[0] = order[1];
+        order[1] = t;
+    }
+    order_pos = 0;
+}
+
+static uint16_t next_tune(void)
+{
+    if (++order_pos >= bank_count)
+        shuffle(order[bank_count - 1]);
+    return order[order_pos];
+}
+
 static uint32_t le32(const uint8_t *p)
 {
     return p[0] | p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
@@ -437,6 +495,12 @@ static void led_init(void)
         ;
     led_write(0x08, 0x01);                      /* internal clock */
     led_write(0x70, 0x00);                      /* PWM from I2C registers */
+    /* LED current: 4.4 mA = 25 % of the 17.5 mA default (0.1 mA steps). With the
+     * PWM range limited to 40 % in led_update() the LED runs at 10 % of its
+     * original brightness and keeps ~50 brightness steps. */
+    led_write(0x05, 0x2C);                      /* B */
+    led_write(0x06, 0x2C);                      /* G */
+    led_write(0x07, 0x2C);                      /* R */
     led_write(0x04, 0);
     led_write(0x03, 0);
     led_write(0x02, 0);
@@ -449,7 +513,7 @@ static void led_update(void)
     int i;
     for (i = 0; i < 3; i++) {
         uint8_t e = (v[i].ctrl >> 4) ? v[i].env : 0;
-        uint8_t b = (uint8_t)((e * e * 4 / 5) >> 9);   /* gamma-ish, max ~101 (80 %) */
+        uint8_t b = (uint8_t)((e * e * 2 / 5) >> 9);   /* gamma-ish, max ~50 */
         if (b != last[i]) {
             led_write(reg[i], b);
             last[i] = b;
@@ -552,7 +616,7 @@ static void button_poll(void)
             stop_playback();
             print("BTN\n");
         } else if (bank_count) {
-            bank_start((bank_tune + 1) % bank_count);
+            bank_start(next_tune());
         }
     }
 }
@@ -595,7 +659,7 @@ static void bank_feed(void)
         playing = 1;
     }
     if (!bank_left && f_head == f_tail)
-        bank_start((bank_tune + 1) % bank_count);
+        bank_start(next_tune());
 }
 
 /* incremental packet parser: returns when it needs more bytes or the FIFO is full */
@@ -658,7 +722,7 @@ static void parse(void)
             stop_playback();
             if (stream_mode && bank_count) {
                 stream_mode = 0;
-                bank_start((bank_tune + 1) % bank_count);
+                bank_start(next_tune());
             }
             stream_mode = 0;
             break;
@@ -686,8 +750,11 @@ int main(void)
     button_init();
     if (BANK[0] == 'S' && BANK[1] == 'I' && BANK[2] == 'D' && BANK[3] == 'B')
         bank_count = BANK[6] | BANK[7] << 8;
-    if (bank_count)
-        bank_start(0);
+    if (bank_count) {
+        seed_rng();
+        shuffle(0xFFFF);
+        bank_start(order[0]);
+    }
     usb->usb_init();
     for (;;) {
         usb->usb_poll();
@@ -697,7 +764,7 @@ int main(void)
         if (stream_mode && f_head == f_tail && isr_n - stream_last > 3 * RATE) {
             stream_mode = 0;                    /* host vanished mid-stream */
             if (bank_count)
-                bank_start((bank_tune + 1) % bank_count);
+                bank_start(next_tune());
         }
         if (isr_n - led_tick >= RATE / 30) {    /* LED at ~30 Hz */
             led_tick = isr_n;

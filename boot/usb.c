@@ -452,6 +452,8 @@ void usb_poll(void)
 {
     uint8_t is = USB_INT_STAT;
 
+    bwt_service();
+
     if (is & USB_INT_USB_RST) {
         bus_reset();
         return;
